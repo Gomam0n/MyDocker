@@ -91,3 +91,19 @@ docker pull --platform=linux/amd64 nginx
 ```
 
 
+---
+
+## Linux Namespace 机制简介
+
+Linux Namespace 是 Linux 内核提供的一种资源隔离机制。通过 Namespace，内核可以将全局资源（如进程ID、网络、挂载点、用户、主机名等）划分到不同的命名空间中，每个命名空间中的资源彼此隔离。这样，容器中的进程就像运行在独立的系统环境中一样，互不影响。
+
+常见的 Namespace 类型包括：
+- **PID Namespace**：隔离进程编号（PID），实现每个容器有独立的进程树。
+- **NET Namespace**：隔离网络设备、IP 地址、端口等。
+- **MNT Namespace**：隔离挂载点（文件系统视图）。
+- **UTS Namespace**：隔离主机名和域名。
+- **IPC Namespace**：隔离进程间通信资源。
+- **USER Namespace**：隔离用户和用户组ID。
+
+通过这些 Namespace，容器能够实现进程、网络、文件系统等多方面的隔离，是容器技术的核心基础之一。
+
