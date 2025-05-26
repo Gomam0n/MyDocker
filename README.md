@@ -107,3 +107,185 @@ Linux Namespace 是 Linux 内核提供的一种资源隔离机制。通过 Names
 
 通过这些 Namespace，容器能够实现进程、网络、文件系统等多方面的隔离，是容器技术的核心基础之一。
 
+
+## cgroups 详解及其在 Docker 中的应用
+
+**cgroups**（Control Groups）是 Linux 内核提供的一种机制，用于限制、记录和隔离进程组所使用的物理资源（如 CPU、内存、磁盘 I/O 等）。它是 Linux 容器技术的核心基础之一。
+
+### cgroups 的主要功能
+
+1. **资源限制（Resource Limiting）**
+   - 限制进程组能够使用的资源上限
+   - 例如：限制某个进程组最多使用 2GB 内存或 50% CPU
+
+2. **优先级分配（Prioritization）**
+   - 通过控制进程组对资源的访问优先级来确保重要任务获得更多资源
+
+3. **资源统计（Accounting）**
+   - 统计系统资源的使用情况
+   - 可用于计费或监控目的
+
+4. **进程控制（Control）**
+   - 对进程组进行挂起、恢复等操作
+
+### cgroups 的层次结构
+
+cgroups 采用层次化的树状结构：
+- **cgroup 层次结构**：类似文件系统的目录树
+- **子系统（Subsystem）**：具体的资源控制器，如 cpu、memory、blkio 等
+- **任务（Task）**：系统中的进程
+
+### 主要的 cgroup 子系统
+
+- **cpu**：限制 CPU 使用率
+- **cpuacct**：统计 CPU 使用情况
+- **memory**：限制内存使用
+- **blkio**：限制块设备 I/O
+- **devices**：控制对设备的访问
+- **freezer**：挂起或恢复进程组
+- **net_cls**：标记网络数据包
+- **pid**：限制进程数量
+
+### cgroups 在 Docker 中的应用
+
+Docker 大量使用 cgroups 来实现容器的资源管理和隔离：
+
+#### 1. 资源限制
+
+```bash
+# 限制容器内存使用
+docker run -m 512m nginx
+
+# 限制 CPU 使用
+docker run --cpus="1.5" nginx
+
+# 限制 CPU 份额
+docker run --cpu-shares=512 nginx
+```
+
+#### 2. 具体应用场景
+
+**内存管理**：
+- Docker 通过 memory cgroup 限制容器的内存使用
+- 防止某个容器消耗过多内存影响其他容器
+- 当容器超出内存限制时，会触发 OOM Killer
+
+**CPU 管理**：
+- 使用 cpu cgroup 控制容器的 CPU 使用率
+- 支持 CPU 份额分配和绝对限制
+- 确保关键服务获得足够的 CPU 资源
+
+**I/O 管理**：
+- 通过 blkio cgroup 限制容器的磁盘读写速度
+- 防止某个容器的大量 I/O 操作影响系统性能
+
+#### 3. Docker 中的 cgroups 实现
+
+Docker 在 `/sys/fs/cgroup` 目录下为每个容器创建对应的 cgroup：
+
+```bash
+# 查看容器的 cgroup 信息
+ls /sys/fs/cgroup/memory/docker/
+ls /sys/fs/cgroup/cpu/docker/
+```
+
+#### 4. 监控和管理
+
+Docker 提供了多种方式来监控容器资源使用：
+
+```bash
+# 查看容器资源使用情况
+docker stats
+
+# 查看容器详细信息
+docker inspect <container_id>
+```
+
+#### 5. cgroups v1 vs v2
+
+- **cgroups v1**：传统版本，每个子系统独立的层次结构
+- **cgroups v2**：统一层次结构，更简洁的设计，更好的性能
+
+Docker 目前同时支持两个版本，并逐步迁移到 cgroups v2。
+
+### 总结
+
+cgroups 是容器技术的重要基石，它与 namespace 一起构成了 Linux 容器的核心机制：
+- **namespace** 提供隔离性（进程看不到彼此）
+- **cgroups** 提供资源控制（限制进程能使用多少资源）
+
+在 Docker 中，cgroups 确保了容器之间的资源公平分配和系统稳定性，是实现多租户环境和资源管理的关键技术。
+
+
+---
+
+### Union File System（联合文件系统）与 AUFS 及其在 Docker 中的应用
+
+#### Union File System 简介
+Union File System（联合文件系统，简称 UnionFS）是一种支持将多个不同目录（分支）叠加（mount）到同一个虚拟文件系统中的文件系统。它允许将多个只读层和一个可写层合并为一个统一的文件系统视图，对上层应用透明。
+
+**主要特性：**
+- 多层叠加：可以将多个目录（层）合并为一个挂载点，用户看到的是所有层内容的统一视图。
+- 只读与可写分离：底层通常为只读层（如基础镜像），最上层为可写层（如容器运行时的更改）。
+- 写时复制（Copy-on-Write）：当对只读层的文件进行修改时，文件会被复制到可写层，实际修改只发生在可写层。
+
+#### AUFS 简介
+AUFS（Another Union File System）是 Linux 下实现 UnionFS 的一种具体实现。它支持高效的多层叠加、写时复制和分支管理，是 Docker 早期默认采用的存储驱动。
+
+**AUFS 的优势：**
+- 支持多层镜像高效叠加，节省存储空间。
+- 支持写时复制，保证只读层安全。
+- 支持动态添加/删除分支，灵活性高。
+
+#### UnionFS/AUFS 在 Docker 中的应用
+Docker 镜像采用分层结构，每一层都是只读的，容器运行时会在镜像层之上添加一个可写层。Docker 通过 UnionFS（如 AUFS、OverlayFS、btrfs 等）将这些层合并为一个统一的文件系统视图。
+
+## OverlayFS 与 AUFS 的区别
+
+- **内核支持**：
+  - AUFS 需要额外打补丁或单独编译内核模块，主线 Linux 内核未集成。
+  - OverlayFS 从 Linux 3.18 起被主线内核支持，现代发行版默认集成。
+- **实现机制**：
+  - AUFS 支持多层（multi-branch）挂载，灵活性高，可动态添加/删除分支。
+  - OverlayFS 主要支持两层（lowerdir/upperdir），但可通过 lowerdir 逗号分隔实现多层只读。
+- **性能与兼容性**：
+  - AUFS 功能丰富，兼容性好，但维护压力大，社区活跃度下降。
+  - OverlayFS 设计简单，性能优良，社区维护活跃，Docker、Kubernetes 等主流容器平台推荐。
+- **写时复制（COW）行为**：
+  - 两者都支持写时复制，但 AUFS 支持更复杂的分支合并和白化（whiteout）策略。
+  - OverlayFS 的白化机制更简单，行为更易于预测。
+- **应用场景**：
+  - AUFS 适合需要复杂分层和动态分支管理的场景。
+  - OverlayFS 更适合主流容器、轻量级分层文件系统。
+
+> 建议在新项目和容器环境中优先使用 OverlayFS。
+- 镜像分层：每次 Dockerfile 的指令（如 RUN、COPY）都会生成一层，所有层通过 UnionFS 叠加。
+- 容器写层：容器启动后，所有更改（如新建文件、修改文件）都发生在最上层的可写层，不影响底层镜像。
+- 节省空间：多个容器共享相同的只读层，避免重复存储。
+
+**示意图：**
+```
+容器可写层（Container Layer，可写）
+-----------------------------
+镜像层N（Image Layer N，只读）
+-----------------------------
+镜像层N-1（只读）
+-----------------------------
+基础镜像层（Base Image Layer，只读）
+```
+
+**常见 UnionFS 实现：**
+- AUFS（早期 Docker 默认，需内核支持）
+- OverlayFS（现代 Linux 推荐，Docker 默认）
+- btrfs、zfs 等
+
+**注意：**
+- AUFS 需要内核补丁，部分发行版默认不支持。
+- OverlayFS 现已成为 Docker 的主流存储驱动。
+
+#### 参考命令
+- 查看 Docker 当前存储驱动：`docker info | grep Storage` 
+- 查看镜像分层：`docker history 镜像名`
+
+---
+
