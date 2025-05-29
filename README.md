@@ -110,6 +110,35 @@ Linux Namespace 是 Linux 内核提供的一种资源隔离机制。通过 Names
 
 ## cgroups 详解及其在 Docker 中的应用
 
+### 常见 cgroup 控制文件及作用
+
+- memory 子系统：
+  - `memory.limit_in_bytes`：设置该 cgroup 可用的最大物理内存（字节）。
+  - `memory.usage_in_bytes`：当前已用内存。
+  - `memory.max_usage_in_bytes`：历史最大内存使用量。
+  - `memory.failcnt`：分配失败次数。
+  - `memory.memsw.limit_in_bytes`：内存+swap限制。
+- cpu 子系统：
+  - `cpu.shares`：相对 CPU 份额权重。
+  - `cpu.cfs_period_us`：CFS 调度周期（微秒）。
+  - `cpu.cfs_quota_us`：CFS 调度配额（微秒）。
+  - `cpu.stat`：CPU 统计信息。
+- cpuset 子系统：
+  - `cpuset.cpus`：允许使用的 CPU 核心列表。
+  - `cpuset.mems`：允许使用的内存节点（NUMA 节点）。
+  - `cpuset.memory_migrate`：内存迁移开关。
+  - `cpuset.memory_pressure`：内存压力。
+  - `cpuset.memory_spread_page`：页面分布。
+  - `cpuset.memory_spread_slab`：slab 分布。
+  - `cpuset.sched_load_balance`：CPU 负载均衡开关。
+  - `cpuset.exclusive`：独占资源开关。
+- 通用文件：
+  - `cgroup.procs`：当前 cgroup 下的进程 PID 列表。
+  - `tasks`：当前 cgroup 下的任务（线程）列表。
+  - `notify_on_release`：cgroup 释放时通知。
+
+这些文件用于配置和管理容器或进程的资源限制，是理解 Docker 等容器技术底层实现的重要基础。
+
 **cgroups**（Control Groups）是 Linux 内核提供的一种机制，用于限制、记录和隔离进程组所使用的物理资源（如 CPU、内存、磁盘 I/O 等）。它是 Linux 容器技术的核心基础之一。
 
 ### cgroups 的主要功能
