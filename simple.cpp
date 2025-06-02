@@ -29,10 +29,85 @@ const std::string BUSYBOX_TAR_URL = "/home/qianyifan/busybox.tar";
 const std::string WRITE_LAYER_URL = "/home/qianyifan/writeLayer/";
 const std::string WORK_DIR_URL = "/home/qianyifan/work/";
 
+// Volume相关结构
+struct VolumeInfo {
+    std::string host_path;
+    std::string container_path;
+    bool valid;
+};
+
 // 检查路径是否存在
 bool path_exists(const std::string& path) {
     struct stat buffer;
     return (stat(path.c_str(), &buffer) == 0);
+}
+
+// 解析volume参数 (格式: host_path:container_path)
+VolumeInfo parse_volume(const std::string& volume_str) {
+    VolumeInfo volume_info = {"", "", false};
+    
+    size_t colon_pos = volume_str.find(':');
+    if (colon_pos != std::string::npos && colon_pos > 0 && colon_pos < volume_str.length() - 1) {
+        volume_info.host_path = volume_str.substr(0, colon_pos);
+        volume_info.container_path = volume_str.substr(colon_pos + 1);
+        volume_info.valid = true;
+        std::cout << "[Volume] Parsed volume: " << volume_info.host_path << " -> " << volume_info.container_path << std::endl;
+    } else {
+        std::cerr << "[Volume] Invalid volume format: " << volume_str << " (expected host_path:container_path)" << std::endl;
+    }
+    
+    return volume_info;
+}
+
+// 挂载volume
+void mount_volume(const VolumeInfo& volume_info) {
+    if (!volume_info.valid) {
+        return;
+    }
+    
+    std::cout << "[Volume] Mounting volume..." << std::endl;
+    
+    // 创建宿主机目录（如果不存在）
+    if (!path_exists(volume_info.host_path)) {
+        if (mkdir(volume_info.host_path.c_str(), 0777) != 0) {
+            perror("mkdir host volume dir failed");
+            return;
+        }
+        std::cout << "[Volume] Created host directory: " << volume_info.host_path << std::endl;
+    }
+    
+    // 创建容器内目录
+    std::string container_volume_path = MNT_URL + volume_info.container_path;
+    if (mkdir(container_volume_path.c_str(), 0777) != 0) {
+        if (errno != EEXIST) {
+            perror("mkdir container volume dir failed");
+            return;
+        }
+    }
+    
+    // 使用bind mount挂载volume
+    if (mount(volume_info.host_path.c_str(), container_volume_path.c_str(), "", MS_BIND, nullptr) != 0) {
+        perror("mount volume failed");
+        return;
+    }
+    
+    std::cout << "[Volume] Volume mounted successfully: " << volume_info.host_path << " -> " << container_volume_path << std::endl;
+}
+
+// 卸载volume
+void umount_volume(const VolumeInfo& volume_info) {
+    if (!volume_info.valid) {
+        return;
+    }
+    
+    std::string container_volume_path = MNT_URL + volume_info.container_path;
+    std::cout << "[Volume] Unmounting volume: " << container_volume_path << std::endl;
+    
+    if (umount(container_volume_path.c_str()) != 0) {
+        perror("umount volume failed");
+    } else {
+        std::cout << "[Volume] Volume unmounted successfully" << std::endl;
+    }
 }
 
 // 创建只读层（解压busybox）
@@ -89,7 +164,7 @@ void create_mount_point() {
     
     // 构建OverlayFS挂载命令
     std::string overlay_opts = "lowerdir=" + BUSYBOX_URL + ",upperdir=" + WRITE_LAYER_URL + ",workdir=" + WORK_DIR_URL;
-    std::string mount_cmd = "mount -t overlay overlay -o " + overlay_opts + " " + MNT_URL;
+    std::string mount_cmd = "sudo mount -t overlay overlay -o " + overlay_opts + " " + MNT_URL;
     
     if (system(mount_cmd.c_str()) != 0) {
         std::cerr << "[FileSystem] OverlayFS mount failed" << std::endl;
@@ -98,12 +173,33 @@ void create_mount_point() {
     }
 }
 
+// Commit功能：将容器保存为镜像
+void commit_container(const std::string& image_name) {
+    std::cout << "[Commit] Committing container to image: " << image_name << std::endl;
+    
+    std::string image_tar = ROOT_URL + image_name + ".tar";
+    std::string tar_cmd = "tar -czf " + image_tar + " -C " + MNT_URL + " .";
+    
+    std::cout << "[Commit] Creating tar archive: " << image_tar << std::endl;
+    
+    if (system(tar_cmd.c_str()) != 0) {
+        std::cerr << "[Commit] Failed to create tar archive" << std::endl;
+    } else {
+        std::cout << "[Commit] Container committed successfully to: " << image_tar << std::endl;
+    }
+}
+
 // 创建工作空间（OverlayFS文件系统）
-void new_workspace() {
+void new_workspace(const VolumeInfo& volume_info = {}) {
     std::cout << "[FileSystem] Setting up container workspace..." << std::endl;
     create_readonly_layer();
     create_write_layer();
     create_mount_point();
+    
+    // 如果有volume，则挂载volume
+    if (volume_info.valid) {
+        mount_volume(volume_info);
+    }
 }
 
 // 删除挂载点
@@ -138,8 +234,14 @@ void delete_write_layer() {
 }
 
 // 删除工作空间
-void delete_workspace() {
+void delete_workspace(const VolumeInfo& volume_info = {}) {
     std::cout << "[FileSystem] Cleaning up workspace..." << std::endl;
+    
+    // 如果有volume，先卸载volume
+    if (volume_info.valid) {
+        umount_volume(volume_info);
+    }
+    
     delete_mount_point();
     delete_write_layer();
 }
@@ -308,8 +410,9 @@ int container_init(void* arg) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <command> [args...] [--mem <MB>] [--cpu <shares>] [--cpuset <cpus>]" << std::endl;
-        std::cerr << "Example: " << argv[0] << " /bin/sh --mem 100 --cpu 512 --cpuset 0-1" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <command> [args...] [--mem <MB>] [--cpu <shares>] [--cpuset <cpus>] [-v <host_path:container_path>] [--commit <image_name>]" << std::endl;
+        std::cerr << "Example: " << argv[0] << " /bin/sh --mem 100 --cpu 512 --cpuset 0-1 -v /tmp:/tmp" << std::endl;
+        std::cerr << "Commit:  " << argv[0] << " /bin/sh --commit myimage" << std::endl;
         return 1;
     }
     
@@ -319,6 +422,8 @@ int main(int argc, char* argv[]) {
     size_t mem_limit = 50 * 1024 * 1024; // 50MB
     std::string cpu_shares = "";
     std::string cpuset = "";
+    std::string volume_str = "";
+    std::string commit_image = "";
     std::vector<char*> cmd_args;
     
     // 解析命令行参数
@@ -329,6 +434,10 @@ int main(int argc, char* argv[]) {
             cpu_shares = argv[++i];
         } else if (strcmp(argv[i], "--cpuset") == 0 && i + 1 < argc) {
             cpuset = argv[++i];
+        } else if (strcmp(argv[i], "-v") == 0 && i + 1 < argc) {
+            volume_str = argv[++i];
+        } else if (strcmp(argv[i], "--commit") == 0 && i + 1 < argc) {
+            commit_image = argv[++i];
         } else {
             cmd_args.push_back(argv[i]);
         }
@@ -341,8 +450,16 @@ int main(int argc, char* argv[]) {
     cmd_args.push_back(nullptr);
     char** child_args = cmd_args.data();
     
+    // 解析volume参数
+    VolumeInfo volume_info;
+    if (!volume_str.empty()) {
+        volume_info = parse_volume(volume_str);
+    } else {
+        volume_info = {"", "", false};
+    }
+    
     // 创建容器工作空间（OverlayFS文件系统）
-    new_workspace();
+    new_workspace(volume_info);
     
     // 创建容器进程
     char* stack = new char[STACK_SIZE];
@@ -373,10 +490,15 @@ int main(int argc, char* argv[]) {
     
     std::cout << "[Main] Container finished with status: " << WEXITSTATUS(status) << std::endl;
     
+    // 如果指定了commit，则保存容器为镜像
+    if (!commit_image.empty()) {
+        commit_container(commit_image);
+    }
+    
     // 清理资源
     std::cout << "[Main] Cleaning up resources..." << std::endl;
     delete[] stack;
-    delete_workspace();
+    delete_workspace(volume_info);
     
     std::cout << "[Main] SimpleDocker finished successfully" << std::endl;
     return 0;
