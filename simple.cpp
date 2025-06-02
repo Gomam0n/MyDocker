@@ -226,33 +226,7 @@ void setup_mount() {
     } else {
         std::cout << "[FileSystem] /dev mounted successfully" << std::endl;
     }
-    
-    // 在 /dev 下创建基本设备节点（添加这部分）
-    mknod("/dev/console", S_IFCHR | 0600, makedev(5, 1));
-    mknod("/dev/tty", S_IFCHR | 0600, makedev(5, 0));
-    mknod("/dev/null", S_IFCHR | 0666, makedev(1, 3));
-    mknod("/dev/zero", S_IFCHR | 0666, makedev(1, 5));
-    mknod("/dev/random", S_IFCHR | 0666, makedev(1, 8));
-    mknod("/dev/urandom", S_IFCHR | 0666, makedev(1, 9));
-    
-    // 创建并挂载 /dev/pts（关键修复）
-    if (mkdir("/dev/pts", 0755) != 0 && errno != EEXIST) {
-        perror("mkdir /dev/pts failed");
-    }
-    
-    if (mount("devpts", "/dev/pts", "devpts", 
-              MS_NOEXEC | MS_NOSUID | MS_RELATIME, 
-              "newinstance,ptmxmode=0666,mode=0620,gid=5") != 0) {
-        perror("mount devpts to /dev/pts failed");
-    } else {
-        std::cout << "[FileSystem] /dev/pts mounted successfully" << std::endl;
-    }
-    
-    // 创建 ptmx 符号链接
-    if (symlink("pts/ptmx", "/dev/ptmx") != 0 && errno != EEXIST) {
-        perror("create ptmx symlink failed");
-    }
-    
+        
     // 挂载sysfs到/sys
     if (mount("sysfs", "/sys", "sysfs", MS_NOEXEC | MS_NOSUID | MS_NODEV, nullptr) != 0) {
         perror("mount sysfs to /sys failed");
@@ -328,11 +302,6 @@ int container_init(void* arg) {
         perror("execvp failed");
         return -1;
     }
-
-    umount("/tmp");
-    umount("/sys");
-    umount("/proc");
-    umount("/dev/pts");
 
     return 0;
 }
