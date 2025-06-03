@@ -479,3 +479,214 @@ Docker Volume 是容器技术中不可或缺的重要组件，它解决了容器
 
 在设计和使用容器化应用时，正确理解和使用 Volume 是确保应用稳定性和数据安全性的关键因素。
 
+---
+
+## Docker 中的 runC
+
+### 什么是 runC？
+
+**runC** 是一个轻量级、可移植的容器运行时（Container Runtime），它是 Docker 公司开源的项目，也是 Open Container Initiative (OCI) 的参考实现。runC 专门用于根据 OCI 规范运行容器。
+
+### runC 的核心特性
+
+#### 1. **OCI 兼容性**
+- 完全符合 OCI Runtime Specification
+- 支持标准化的容器格式和运行时接口
+- 确保容器的可移植性和互操作性
+
+#### 2. **轻量级设计**
+- 最小化的运行时环境
+- 低资源消耗
+- 快速启动和执行
+
+#### 3. **安全性**
+- 支持多种安全特性（seccomp、AppArmor、SELinux）
+- 用户命名空间隔离
+- 权限控制和资源限制
+
+### runC 在 Docker 架构中的位置
+
+```
+Docker CLI
+    ↓
+Docker Daemon (dockerd)
+    ↓
+containerd
+    ↓
+containerd-shim
+    ↓
+runC
+    ↓
+容器进程
+```
+
+#### 架构层次说明：
+
+1. **Docker CLI**: 用户交互界面
+2. **Docker Daemon**: 管理镜像、容器、网络等
+3. **containerd**: 容器生命周期管理
+4. **containerd-shim**: 容器进程的父进程
+5. **runC**: 实际创建和运行容器的工具
+
+### runC 的主要功能
+
+#### 1. **容器生命周期管理**
+```bash
+# 创建容器
+runc create <container-id>
+
+# 启动容器
+runc start <container-id>
+
+# 运行容器（创建并启动）
+runc run <container-id>
+
+# 停止容器
+runc kill <container-id>
+
+# 删除容器
+runc delete <container-id>
+```
+
+#### 2. **容器状态查询**
+```bash
+# 列出所有容器
+runc list
+
+# 查看容器状态
+runc state <container-id>
+
+# 查看容器进程
+runc ps <container-id>
+```
+
+#### 3. **容器交互**
+```bash
+# 在运行的容器中执行命令
+runc exec <container-id> <command>
+
+# 暂停容器
+runc pause <container-id>
+
+# 恢复容器
+runc resume <container-id>
+```
+
+### runC 与我们的 SimpleDocker 的对比
+
+| 特性 | runC | SimpleDocker |
+|------|------|-------------|
+| **标准兼容性** | OCI 标准 | 自定义实现 |
+| **功能完整性** | 完整的容器运行时 | 基础容器功能 |
+| **安全特性** | 全面的安全机制 | 基本的 namespace 隔离 |
+| **资源管理** | 完整的 cgroups 支持 | 基础的资源限制 |
+| **网络支持** | 完整的网络栈 | 基本的网络隔离 |
+| **存储支持** | 多种存储驱动 | OverlayFS |
+
+### runC 的配置文件
+
+runC 使用 `config.json` 文件来定义容器的配置：
+
+```json
+{
+  "ociVersion": "1.0.0",
+  "process": {
+    "terminal": true,
+    "user": {
+      "uid": 0,
+      "gid": 0
+    },
+    "args": ["/bin/sh"],
+    "env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"],
+    "cwd": "/"
+  },
+  "root": {
+    "path": "rootfs",
+    "readonly": false
+  },
+  "linux": {
+    "namespaces": [
+      {"type": "pid"},
+      {"type": "network"},
+      {"type": "ipc"},
+      {"type": "uts"},
+      {"type": "mount"}
+    ],
+    "resources": {
+      "memory": {
+        "limit": 104857600
+      },
+      "cpu": {
+        "shares": 1024
+      }
+    }
+  }
+}
+```
+
+### runC 的优势
+
+#### 1. **标准化**
+- 遵循 OCI 标准，确保容器的可移植性
+- 与其他 OCI 兼容的工具互操作
+
+#### 2. **模块化**
+- 专注于容器运行时功能
+- 可以与不同的容器管理系统集成
+
+#### 3. **性能**
+- 轻量级设计，启动速度快
+- 低资源消耗
+
+#### 4. **安全性**
+- 支持多种 Linux 安全机制
+- 细粒度的权限控制
+
+### runC 的使用场景
+
+#### 1. **容器平台开发**
+- 作为底层运行时构建容器平台
+- 集成到 Kubernetes、Docker 等系统中
+
+#### 2. **轻量级容器部署**
+- 在资源受限的环境中运行容器
+- 嵌入式系统和边缘计算
+
+#### 3. **安全容器**
+- 需要高安全性的容器环境
+- 多租户容器平台
+
+### 与其他容器运行时的比较
+
+| 运行时 | 特点 | 适用场景 |
+|--------|------|----------|
+| **runC** | OCI 标准，功能完整 | 通用容器运行 |
+| **crun** | C 语言实现，更快启动 | 性能敏感场景 |
+| **kata-runtime** | 基于虚拟机的安全容器 | 高安全性要求 |
+| **gVisor** | 用户空间内核，安全隔离 | 多租户环境 |
+
+### 学习 runC 的意义
+
+#### 1. **深入理解容器技术**
+- 了解容器的底层实现机制
+- 掌握 OCI 标准和规范
+
+#### 2. **容器平台开发**
+- 为开发自己的容器平台提供基础
+- 理解 Docker、Kubernetes 等系统的工作原理
+
+#### 3. **问题诊断和调试**
+- 更好地诊断容器相关问题
+- 优化容器性能和安全性
+
+### 总结
+
+runC 是现代容器生态系统的核心组件，它提供了标准化、安全、高效的容器运行时环境。通过学习 runC，我们可以：
+
+- 深入理解容器技术的本质
+- 掌握容器标准化的重要性
+- 为构建更复杂的容器系统打下基础
+- 提高容器应用的安全性和可靠性
+
+在我们的 SimpleDocker 项目中，虽然实现了基本的容器功能，但与 runC 相比还有很大的改进空间。学习 runC 的设计理念和实现方式，有助于我们进一步完善和优化自己的容器实现。
+

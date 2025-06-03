@@ -8,3 +8,5 @@
 ```bash
 (mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr) != 0
 ```
+
+## 各种权限问题
