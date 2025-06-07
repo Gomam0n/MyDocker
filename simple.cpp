@@ -410,8 +410,9 @@ int container_init(void* arg) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <command> [args...] [--mem <MB>] [--cpu <shares>] [--cpuset <cpus>] [-v <host_path:container_path>] [--commit <image_name>]" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <command> [args...] [--mem <MB>] [--cpu <shares>] [--cpuset <cpus>] [-v <host_path:container_path>] [--commit <image_name>] [-d]" << std::endl;
         std::cerr << "Example: " << argv[0] << " /bin/sh --mem 100 --cpu 512 --cpuset 0-1 -v /tmp:/tmp" << std::endl;
+        std::cerr << "Detach:  " << argv[0] << " /bin/sh -d" << std::endl;
         std::cerr << "Commit:  " << argv[0] << " /bin/sh --commit myimage" << std::endl;
         return 1;
     }
@@ -424,6 +425,7 @@ int main(int argc, char* argv[]) {
     std::string cpuset = "";
     std::string volume_str = "";
     std::string commit_image = "";
+    bool detach_mode = false;
     std::vector<char*> cmd_args;
     
     // 解析命令行参数
@@ -438,6 +440,8 @@ int main(int argc, char* argv[]) {
             volume_str = argv[++i];
         } else if (strcmp(argv[i], "--commit") == 0 && i + 1 < argc) {
             commit_image = argv[++i];
+        } else if (strcmp(argv[i], "-d") == 0) {
+            detach_mode = true;
         } else {
             cmd_args.push_back(argv[i]);
         }
@@ -483,23 +487,34 @@ int main(int argc, char* argv[]) {
     // 设置 cgroup 资源限制
     setup_cgroup(child_pid, mem_limit, cpu_shares, cpuset);
     
-    // 等待容器进程结束
-    std::cout << "[Main] Waiting for container to finish..." << std::endl;
-    int status;
-    waitpid(child_pid, &status, 0);
-    
-    std::cout << "[Main] Container finished with status: " << WEXITSTATUS(status) << std::endl;
-    
-    // 如果指定了commit，则保存容器为镜像
-    if (!commit_image.empty()) {
-        commit_container(commit_image);
+    if (detach_mode) {
+        // Detach模式：不等待容器进程结束，直接返回
+        std::cout << "[Main] Container started in detach mode with PID: " << child_pid << std::endl;
+        std::cout << "[Main] Container is running in background" << std::endl;
+        
+        // 在detach模式下不清理资源，让容器继续运行
+        delete[] stack;
+        std::cout << "[Main] SimpleDocker detached successfully" << std::endl;
+        return 0;
+    } else {
+        // 非detach模式：等待容器进程结束
+        std::cout << "[Main] Waiting for container to finish..." << std::endl;
+        int status;
+        waitpid(child_pid, &status, 0);
+        
+        std::cout << "[Main] Container finished with status: " << WEXITSTATUS(status) << std::endl;
+        
+        // 如果指定了commit，则保存容器为镜像
+        if (!commit_image.empty()) {
+            commit_container(commit_image);
+        }
+        
+        // 清理资源
+        std::cout << "[Main] Cleaning up resources..." << std::endl;
+        delete[] stack;
+        delete_workspace(volume_info);
+        
+        std::cout << "[Main] SimpleDocker finished successfully" << std::endl;
+        return 0;
     }
-    
-    // 清理资源
-    std::cout << "[Main] Cleaning up resources..." << std::endl;
-    delete[] stack;
-    delete_workspace(volume_info);
-    
-    std::cout << "[Main] SimpleDocker finished successfully" << std::endl;
-    return 0;
 }
