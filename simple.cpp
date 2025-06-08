@@ -14,6 +14,8 @@
 #include <errno.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h> // 用于 makedev()
+#include <ctime> // 用于时间函数
+#include <cstdio> // 用于printf函数
 
 #define STACK_SIZE (1024 * 1024)
 
@@ -29,12 +31,43 @@ const std::string BUSYBOX_TAR_URL = "/home/qianyifan/busybox.tar";
 const std::string WRITE_LAYER_URL = "/home/qianyifan/writeLayer/";
 const std::string WORK_DIR_URL = "/home/qianyifan/work/";
 
+// 容器信息存储路径
+const std::string CONTAINER_INFO_PATH = "/var/run/mydocker/";
+const std::string CONFIG_NAME = "config.json";
+const std::string CONTAINER_LOG_FILE = "container.log";
+
+// 容器状态
+const std::string RUNNING = "running";
+const std::string STOPPED = "stopped";
+const std::string EXITED = "exited";
+
 // Volume相关结构
 struct VolumeInfo {
     std::string host_path;
     std::string container_path;
     bool valid;
 };
+
+// 容器信息结构
+struct ContainerInfo {
+    std::string id;
+    std::string name;
+    std::string pid;
+    std::string command;
+    std::string created_time;
+    std::string status;
+};
+
+// 生成随机字符串作为容器ID
+std::string generate_container_id(int length = 10) {
+    const std::string chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+    std::string result;
+    srand(time(nullptr));
+    for (int i = 0; i < length; ++i) {
+        result += chars[rand() % chars.length()];
+    }
+    return result;
+}
 
 // 检查路径是否存在
 bool path_exists(const std::string& path) {
@@ -187,6 +220,216 @@ void commit_container(const std::string& image_name) {
     } else {
         std::cout << "[Commit] Container committed successfully to: " << image_tar << std::endl;
     }
+}
+
+// 记录容器信息
+std::string record_container_info(pid_t container_pid, const std::vector<std::string>& command_array, 
+                                  const std::string& container_name, const std::string& container_id) {
+    std::cout << "[Container] Recording container info..." << std::endl;
+    
+    // 获取当前时间
+    time_t now = time(0);
+    char* time_str = ctime(&now);
+    std::string created_time(time_str);
+    created_time.pop_back(); // 移除换行符
+    
+    // 构建命令字符串
+    std::string command = "";
+    for (const auto& arg : command_array) {
+        command += arg + " ";
+    }
+    if (!command.empty()) {
+        command.pop_back(); // 移除最后的空格
+    }
+    
+    // 创建容器信息
+    ContainerInfo container_info;
+    container_info.id = container_id;
+    container_info.name = container_name;
+    container_info.pid = std::to_string(container_pid);
+    container_info.command = command;
+    container_info.created_time = created_time;
+    container_info.status = RUNNING;
+    
+    // 创建容器信息目录
+    std::string dir_path = CONTAINER_INFO_PATH + container_name + "/";
+    std::string mkdir_cmd = "mkdir -p " + dir_path;
+    if (system(mkdir_cmd.c_str()) != 0) {
+        std::cerr << "[Container] Failed to create container info directory" << std::endl;
+        return "";
+    }
+    
+    // 写入配置文件（简化的JSON格式）
+    std::string config_file = dir_path + CONFIG_NAME;
+    std::ofstream config_stream(config_file);
+    if (config_stream.is_open()) {
+        config_stream << "{\n";
+        config_stream << "  \"id\": \"" << container_info.id << "\",\n";
+        config_stream << "  \"name\": \"" << container_info.name << "\",\n";
+        config_stream << "  \"pid\": \"" << container_info.pid << "\",\n";
+        config_stream << "  \"command\": \"" << container_info.command << "\",\n";
+        config_stream << "  \"createTime\": \"" << container_info.created_time << "\",\n";
+        config_stream << "  \"status\": \"" << container_info.status << "\"\n";
+        config_stream << "}\n";
+        config_stream.close();
+        std::cout << "[Container] Container info recorded: " << config_file << std::endl;
+    } else {
+        std::cerr << "[Container] Failed to create config file" << std::endl;
+        return "";
+    }
+    
+    // 创建空的日志文件
+    std::string log_file = dir_path + CONTAINER_LOG_FILE;
+    std::ofstream log_stream(log_file);
+    if (log_stream.is_open()) {
+        log_stream.close();
+        std::cout << "[Container] Log file created: " << log_file << std::endl;
+    } else {
+        std::cerr << "[Container] Failed to create log file" << std::endl;
+    }
+    
+    return container_name;
+}
+
+// 删除容器信息
+void delete_container_info(const std::string& container_name) {
+    std::cout << "[Container] Deleting container info: " << container_name << std::endl;
+    
+    std::string dir_path = CONTAINER_INFO_PATH + container_name;
+    std::string rm_cmd = "rm -rf " + dir_path;
+    
+    if (system(rm_cmd.c_str()) != 0) {
+        std::cerr << "[Container] Failed to delete container info directory" << std::endl;
+    } else {
+        std::cout << "[Container] Container info deleted successfully" << std::endl;
+    }
+}
+
+// 解析容器配置文件
+ContainerInfo parse_container_config(const std::string& config_file) {
+    ContainerInfo container_info;
+    std::ifstream file(config_file);
+    
+    if (!file.is_open()) {
+        std::cerr << "[Container] Failed to open config file: " << config_file << std::endl;
+        return container_info;
+    }
+    
+    std::string line;
+    while (std::getline(file, line)) {
+        // 简单的JSON解析（仅适用于我们的格式）
+        if (line.find("\"id\":") != std::string::npos) {
+            size_t start = line.find('"', line.find(':')) + 1;
+            size_t end = line.find('"', start);
+            container_info.id = line.substr(start, end - start);
+        } else if (line.find("\"name\":") != std::string::npos) {
+            size_t start = line.find('"', line.find(':')) + 1;
+            size_t end = line.find('"', start);
+            container_info.name = line.substr(start, end - start);
+        } else if (line.find("\"pid\":") != std::string::npos) {
+            size_t start = line.find('"', line.find(':')) + 1;
+            size_t end = line.find('"', start);
+            container_info.pid = line.substr(start, end - start);
+        } else if (line.find("\"command\":") != std::string::npos) {
+            size_t start = line.find('"', line.find(':')) + 1;
+            size_t end = line.find('"', start);
+            container_info.command = line.substr(start, end - start);
+        } else if (line.find("\"createTime\":") != std::string::npos) {
+            size_t start = line.find('"', line.find(':')) + 1;
+            size_t end = line.find('"', start);
+            container_info.created_time = line.substr(start, end - start);
+        } else if (line.find("\"status\":") != std::string::npos) {
+            size_t start = line.find('"', line.find(':')) + 1;
+            size_t end = line.find('"', start);
+            container_info.status = line.substr(start, end - start);
+        }
+    }
+    
+    file.close();
+    return container_info;
+}
+
+// 列出所有容器
+void list_containers() {
+    std::cout << "[Container] Listing all containers..." << std::endl;
+    
+    // 检查容器信息目录是否存在
+    if (!path_exists(CONTAINER_INFO_PATH)) {
+        std::cout << "No containers found." << std::endl;
+        return;
+    }
+    
+    // 使用ls命令获取目录列表
+    std::string ls_cmd = "ls " + CONTAINER_INFO_PATH + " 2>/dev/null";
+    FILE* pipe = popen(ls_cmd.c_str(), "r");
+    if (!pipe) {
+        std::cerr << "[Container] Failed to list container directories" << std::endl;
+        return;
+    }
+    
+    std::vector<ContainerInfo> containers;
+    char buffer[256];
+    
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        std::string container_name(buffer);
+        container_name.pop_back(); // 移除换行符
+        
+        std::string config_file = CONTAINER_INFO_PATH + container_name + "/" + CONFIG_NAME;
+        if (path_exists(config_file)) {
+            ContainerInfo info = parse_container_config(config_file);
+            if (!info.id.empty()) {
+                containers.push_back(info);
+            }
+        }
+    }
+    
+    pclose(pipe);
+    
+    // 打印容器列表
+    if (containers.empty()) {
+        std::cout << "No containers found." << std::endl;
+        return;
+    }
+    
+    printf("%-12s %-12s %-8s %-10s %-20s %-20s\n", 
+           "ID", "NAME", "PID", "STATUS", "COMMAND", "CREATED");
+    printf("%-12s %-12s %-8s %-10s %-20s %-20s\n", 
+           "------------", "------------", "--------", "----------", "--------------------", "--------------------");
+    
+    for (const auto& container : containers) {
+        printf("%-12s %-12s %-8s %-10s %-20s %-20s\n",
+               container.id.substr(0, 12).c_str(),
+               container.name.c_str(),
+               container.pid.c_str(),
+               container.status.c_str(),
+               container.command.substr(0, 20).c_str(),
+               container.created_time.c_str());
+    }
+}
+
+// 查看容器日志
+void show_container_logs(const std::string& container_name) {
+    std::cout << "[Container] Showing logs for container: " << container_name << std::endl;
+    
+    std::string log_file = CONTAINER_INFO_PATH + container_name + "/" + CONTAINER_LOG_FILE;
+    
+    if (!path_exists(log_file)) {
+        std::cerr << "[Container] Log file not found: " << log_file << std::endl;
+        return;
+    }
+    
+    std::ifstream log_stream(log_file);
+    if (!log_stream.is_open()) {
+        std::cerr << "[Container] Failed to open log file: " << log_file << std::endl;
+        return;
+    }
+    
+    std::string line;
+    while (std::getline(log_stream, line)) {
+        std::cout << line << std::endl;
+    }
+    
+    log_stream.close();
 }
 
 // 创建工作空间（OverlayFS文件系统）
@@ -390,31 +633,89 @@ void setup_cgroup(pid_t pid, size_t mem_limit_bytes, const std::string& cpu_shar
     }
 }
 
+// 容器参数结构体
+struct ContainerArgs {
+    char** child_args;
+    std::string log_file_path;
+    bool detach_mode;
+};
+
 // 容器初始化进程，设置文件系统并执行用户命令
 int container_init(void* arg) {
-    char** argv = static_cast<char**>(arg);
-    std::cout << "[Container] Initializing container..." << std::endl;
-    std::cout << "[Container] Running command: " << argv[0] << std::endl;
+    ContainerArgs* container_args = (ContainerArgs*)arg;
+    char** child_args = container_args->child_args;
     
-    // 设置容器内的文件系统挂载
+    std::cout << "[Container] Container init process started" << std::endl;
+    
+    // 在detach模式下，重定向标准输出和标准错误到日志文件
+    if (container_args->detach_mode && !container_args->log_file_path.empty()) {
+        std::cout << "[Container] Redirecting output to log file: " << container_args->log_file_path << std::endl;
+        
+        // 确保日志文件的父目录存在
+        std::string log_dir = container_args->log_file_path.substr(0, container_args->log_file_path.find_last_of('/'));
+        std::string mkdir_cmd = "mkdir -p " + log_dir;
+        if (system(mkdir_cmd.c_str()) != 0) {
+            std::cerr << "[Container] Failed to create log directory: " << log_dir << std::endl;
+        }
+        
+        // 确保日志文件存在
+        std::ofstream log_file_check(container_args->log_file_path, std::ios::app);
+        if (log_file_check.is_open()) {
+            log_file_check.close();
+        } else {
+            std::cerr << "[Container] Failed to create log file: " << container_args->log_file_path << std::endl;
+        }
+        
+        // 重定向标准输出到日志文件
+        if (freopen(container_args->log_file_path.c_str(), "a", stdout) == nullptr) {
+            perror("Failed to redirect stdout to log file");
+        }
+        
+        // 重定向标准错误到日志文件
+        if (freopen(container_args->log_file_path.c_str(), "a", stderr) == nullptr) {
+            perror("Failed to redirect stderr to log file");
+        }
+        
+        // 设置无缓冲，确保日志实时写入
+        setbuf(stdout, nullptr);
+        setbuf(stderr, nullptr);
+    }
+
+    // 挂载必要的文件系统
     setup_mount();
     
-    // 执行用户命令
-    if (execvp(argv[0], argv) == -1) {
+    std::cout << "[Container] Executing command: " << child_args[0] << std::endl;
+    
+    // 执行用户指定的命令
+    if (execvp(child_args[0], child_args) != 0) {
         perror("execvp failed");
         return -1;
     }
-
+    
     return 0;
 }
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <command> [args...] [--mem <MB>] [--cpu <shares>] [--cpuset <cpus>] [-v <host_path:container_path>] [--commit <image_name>] [-d]" << std::endl;
-        std::cerr << "Example: " << argv[0] << " /bin/sh --mem 100 --cpu 512 --cpuset 0-1 -v /tmp:/tmp" << std::endl;
-        std::cerr << "Detach:  " << argv[0] << " /bin/sh -d" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <command> [args...] [--mem <MB>] [--cpu <shares>] [--cpuset <cpus>] [-v <host_path:container_path>] [--commit <image_name>] [--name <container_name>] [-d]" << std::endl;
+        std::cerr << "       " << argv[0] << " ps" << std::endl;
+        std::cerr << "       " << argv[0] << " logs <container_name>" << std::endl;
+        std::cerr << "Example: " << argv[0] << " /bin/sh --mem 100 --cpu 512 --cpuset 0-1 -v /tmp:/tmp --name mycontainer" << std::endl;
+        std::cerr << "Detach:  " << argv[0] << " /bin/sh -d --name mycontainer" << std::endl;
         std::cerr << "Commit:  " << argv[0] << " /bin/sh --commit myimage" << std::endl;
         return 1;
+    }
+    
+    // 处理ps命令
+    if (argc == 2 && strcmp(argv[1], "ps") == 0) {
+        list_containers();
+        return 0;
+    }
+    
+    // 处理logs命令
+    if (argc == 3 && strcmp(argv[1], "logs") == 0) {
+        show_container_logs(argv[2]);
+        return 0;
     }
     
     std::cout << "[Main] Starting SimpleDocker with filesystem isolation..." << std::endl;
@@ -425,6 +726,7 @@ int main(int argc, char* argv[]) {
     std::string cpuset = "";
     std::string volume_str = "";
     std::string commit_image = "";
+    std::string container_name = "";
     bool detach_mode = false;
     std::vector<char*> cmd_args;
     
@@ -440,6 +742,8 @@ int main(int argc, char* argv[]) {
             volume_str = argv[++i];
         } else if (strcmp(argv[i], "--commit") == 0 && i + 1 < argc) {
             commit_image = argv[++i];
+        } else if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
+            container_name = argv[++i];
         } else if (strcmp(argv[i], "-d") == 0) {
             detach_mode = true;
         } else {
@@ -462,8 +766,26 @@ int main(int argc, char* argv[]) {
         volume_info = {"", "", false};
     }
     
+    // 生成容器ID和名称
+    std::string container_id = generate_container_id();
+    if (container_name.empty()) {
+        container_name = container_id;
+    }
+    
+    std::cout << "[Main] Container ID: " << container_id << std::endl;
+    std::cout << "[Main] Container Name: " << container_name << std::endl;
+    
     // 创建容器工作空间（OverlayFS文件系统）
     new_workspace(volume_info);
+    
+    // 准备容器参数
+    ContainerArgs container_args;
+    container_args.child_args = child_args;
+    container_args.detach_mode = detach_mode;
+    
+    // 构建日志文件路径
+    std::string log_file_path = CONTAINER_INFO_PATH + container_name + "/" + CONTAINER_LOG_FILE;
+    container_args.log_file_path = log_file_path;
     
     // 创建容器进程
     char* stack = new char[STACK_SIZE];
@@ -473,7 +795,7 @@ int main(int argc, char* argv[]) {
     int child_pid = clone(container_init, stackTop, 
                          CLONE_NEWUTS | CLONE_NEWPID | CLONE_NEWNS | 
                          CLONE_NEWNET | CLONE_NEWIPC | SIGCHLD, 
-                         child_args);
+                         &container_args);
     
     if (child_pid == -1) {
         perror("clone failed");
@@ -484,17 +806,30 @@ int main(int argc, char* argv[]) {
     
     std::cout << "[Main] Container process created with PID: " << child_pid << std::endl;
     
+    // 记录容器信息
+    std::vector<std::string> command_vector;
+    for (char** arg = child_args; *arg != nullptr; ++arg) {
+        command_vector.push_back(*arg);
+    }
+    
+    std::string recorded_name = record_container_info(child_pid, command_vector, container_name, container_id);
+    if (recorded_name.empty()) {
+        std::cerr << "[Main] Failed to record container info" << std::endl;
+    }
+    
     // 设置 cgroup 资源限制
     setup_cgroup(child_pid, mem_limit, cpu_shares, cpuset);
     
     if (detach_mode) {
         // Detach模式：不等待容器进程结束，直接返回
         std::cout << "[Main] Container started in detach mode with PID: " << child_pid << std::endl;
+        std::cout << "[Main] Container Name: " << container_name << std::endl;
         std::cout << "[Main] Container is running in background" << std::endl;
         
         // 在detach模式下不清理资源，让容器继续运行
         delete[] stack;
         std::cout << "[Main] SimpleDocker detached successfully" << std::endl;
+        std::cout << "[Main] Use 'ps' to list containers and 'logs " << container_name << "' to view logs" << std::endl;
         return 0;
     } else {
         // 非detach模式：等待容器进程结束
@@ -508,6 +843,9 @@ int main(int argc, char* argv[]) {
         if (!commit_image.empty()) {
             commit_container(commit_image);
         }
+        
+        // 删除容器信息（非detach模式下容器已结束）
+        delete_container_info(container_name);
         
         // 清理资源
         std::cout << "[Main] Cleaning up resources..." << std::endl;
