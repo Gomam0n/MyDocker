@@ -432,6 +432,90 @@ void show_container_logs(const std::string& container_name) {
     log_stream.close();
 }
 
+// 获取容器PID
+std::string get_container_pid(const std::string& container_name) {
+    std::string config_file = CONTAINER_INFO_PATH + container_name + "/" + CONFIG_NAME;
+    
+    if (!path_exists(config_file)) {
+        std::cerr << "[Exec] Container config file not found: " << config_file << std::endl;
+        return "";
+    }
+    
+    ContainerInfo container_info = parse_container_config(config_file);
+    if (container_info.pid.empty()) {
+        std::cerr << "[Exec] Failed to get container PID" << std::endl;
+        return "";
+    }
+    
+    return container_info.pid;
+}
+
+// 进入容器命名空间执行命令
+void exec_container(const std::string& container_name, const std::vector<std::string>& exec_cmd) {
+    std::cout << "[Exec] Executing command in container: " << container_name << std::endl;
+    
+    // 获取容器PID
+    std::string container_pid = get_container_pid(container_name);
+    if (container_pid.empty()) {
+        std::cerr << "[Exec] Failed to get container PID" << std::endl;
+        return;
+    }
+    
+    std::cout << "[Exec] Container PID: " << container_pid << std::endl;
+    
+    // 构建命令字符串
+    std::string cmd_str = "";
+    for (size_t i = 0; i < exec_cmd.size(); ++i) {
+        cmd_str += exec_cmd[i];
+        if (i < exec_cmd.size() - 1) {
+            cmd_str += " ";
+        }
+    }
+    
+    std::cout << "[Exec] Command: " << cmd_str << std::endl;
+    
+    // 进入容器的各个命名空间
+    std::vector<std::string> namespaces = {"ipc", "uts", "net", "pid", "mnt"};
+    
+    for (const auto& ns : namespaces) {
+        std::string ns_path = "/proc/" + container_pid + "/ns/" + ns;
+        int fd = open(ns_path.c_str(), O_RDONLY);
+        
+        if (fd == -1) {
+            std::cerr << "[Exec] Failed to open namespace: " << ns_path << std::endl;
+            continue;
+        }
+        
+        if (setns(fd, 0) == -1) {
+            std::cerr << "[Exec] Failed to enter namespace: " << ns << std::endl;
+            perror("setns");
+        } else {
+            std::cout << "[Exec] Entered namespace: " << ns << std::endl;
+        }
+        
+        close(fd);
+    }
+
+    // 切换到容器的根目录
+    if (chdir("/") != 0) {
+        perror("[Exec] Failed to chdir to container root");
+        return;
+    }
+
+    std::cout << "[Exec] Changed working directory to container root" << std::endl;
+    
+    // 执行命令
+    std::vector<char*> args;
+    for (const auto& arg : exec_cmd) {
+        args.push_back(const_cast<char*>(arg.c_str()));
+    }
+    args.push_back(nullptr);
+    
+    if (execvp(args[0], args.data()) == -1) {
+        perror("[Exec] execvp failed");
+    }
+}
+
 // 创建工作空间（OverlayFS文件系统）
 void new_workspace(const VolumeInfo& volume_info = {}) {
     std::cout << "[FileSystem] Setting up container workspace..." << std::endl;
@@ -700,9 +784,11 @@ int main(int argc, char* argv[]) {
         std::cerr << "Usage: " << argv[0] << " <command> [args...] [--mem <MB>] [--cpu <shares>] [--cpuset <cpus>] [-v <host_path:container_path>] [--commit <image_name>] [--name <container_name>] [-d]" << std::endl;
         std::cerr << "       " << argv[0] << " ps" << std::endl;
         std::cerr << "       " << argv[0] << " logs <container_name>" << std::endl;
+        std::cerr << "       " << argv[0] << " exec <container_name> <command> [args...]" << std::endl;
         std::cerr << "Example: " << argv[0] << " /bin/sh --mem 100 --cpu 512 --cpuset 0-1 -v /tmp:/tmp --name mycontainer" << std::endl;
         std::cerr << "Detach:  " << argv[0] << " /bin/sh -d --name mycontainer" << std::endl;
         std::cerr << "Commit:  " << argv[0] << " /bin/sh --commit myimage" << std::endl;
+        std::cerr << "Exec:    " << argv[0] << " exec mycontainer /bin/ls" << std::endl;
         return 1;
     }
     
@@ -715,6 +801,17 @@ int main(int argc, char* argv[]) {
     // 处理logs命令
     if (argc == 3 && strcmp(argv[1], "logs") == 0) {
         show_container_logs(argv[2]);
+        return 0;
+    }
+    
+    // 处理exec命令
+    if (argc >= 4 && strcmp(argv[1], "exec") == 0) {
+        std::string container_name = argv[2];
+        std::vector<std::string> exec_cmd;
+        for (int i = 3; i < argc; ++i) {
+            exec_cmd.push_back(argv[i]);
+        }
+        exec_container(container_name, exec_cmd);
         return 0;
     }
     
