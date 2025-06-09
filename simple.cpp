@@ -451,6 +451,46 @@ std::string get_container_pid(const std::string& container_name) {
     return container_info.pid;
 }
 
+// 获取容器的环境变量
+std::vector<std::string> get_container_envs(const std::string& container_pid) {
+    std::vector<std::string> envs;
+    std::string environ_path = "/proc/" + container_pid + "/environ";
+    
+    std::ifstream environ_file(environ_path, std::ios::binary);
+    if (!environ_file.is_open()) {
+        std::cerr << "[Exec] Failed to open environ file: " << environ_path << std::endl;
+        return envs;
+    }
+    
+    std::string content((std::istreambuf_iterator<char>(environ_file)),
+                        std::istreambuf_iterator<char>());
+    environ_file.close();
+    
+    // 按\0分割环境变量
+    size_t start = 0;
+    size_t pos = 0;
+    while ((pos = content.find('\0', start)) != std::string::npos) {
+        if (pos > start) {
+            std::string env_var = content.substr(start, pos - start);
+            if (!env_var.empty()) {
+                envs.push_back(env_var);
+            }
+        }
+        start = pos + 1;
+    }
+    
+    // 处理最后一个环境变量（如果没有以\0结尾）
+    if (start < content.length()) {
+        std::string env_var = content.substr(start);
+        if (!env_var.empty()) {
+            envs.push_back(env_var);
+        }
+    }
+    
+    std::cout << "[Exec] Found " << envs.size() << " environment variables" << std::endl;
+    return envs;
+}
+
 // 进入容器命名空间执行命令
 void exec_container(const std::string& container_name, const std::vector<std::string>& exec_cmd) {
     std::cout << "[Exec] Executing command in container: " << container_name << std::endl;
@@ -505,6 +545,17 @@ void exec_container(const std::string& container_name, const std::vector<std::st
     }
 
     std::cout << "[Exec] Changed working directory to container root" << std::endl;
+    
+    // 获取容器的环境变量
+    std::vector<std::string> container_envs = get_container_envs(container_pid);
+    
+    // 设置容器的环境变量
+    for (const auto& env_var : container_envs) {
+        std::cout << "[Exec] Setting environment variable: " << env_var << std::endl;
+        if (putenv(strdup(env_var.c_str())) != 0) {
+            std::cerr << "[Exec] Failed to set environment variable: " << env_var << std::endl;
+        }
+    }
     
     // 执行命令
     std::vector<char*> args;
@@ -804,6 +855,7 @@ struct ContainerArgs {
     char** child_args;
     std::string log_file_path;
     bool detach_mode;
+    std::vector<std::string> env_vars;
 };
 
 // 容器初始化进程，设置文件系统并执行用户命令
@@ -850,6 +902,14 @@ int container_init(void* arg) {
     // 挂载必要的文件系统
     setup_mount();
     
+    // 设置环境变量
+    for (const auto& env_var : container_args->env_vars) {
+        std::cout << "[Container] Setting environment variable: " << env_var << std::endl;
+        if (putenv(strdup(env_var.c_str())) != 0) {
+            std::cerr << "[Container] Failed to set environment variable: " << env_var << std::endl;
+        }
+    }
+    
     std::cout << "[Container] Executing command: " << child_args[0] << std::endl;
     
     // 执行用户指定的命令
@@ -863,13 +923,13 @@ int container_init(void* arg) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <command> [args...] [--mem <MB>] [--cpu <shares>] [--cpuset <cpus>] [-v <host_path:container_path>] [--commit <image_name>] [--name <container_name>] [-d]" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <command> [args...] [--mem <MB>] [--cpu <shares>] [--cpuset <cpus>] [-v <host_path:container_path>] [-e <key=value>] [--commit <image_name>] [--name <container_name>] [-d]" << std::endl;
         std::cerr << "       " << argv[0] << " ps" << std::endl;
         std::cerr << "       " << argv[0] << " logs <container_name>" << std::endl;
         std::cerr << "       " << argv[0] << " exec <container_name> <command> [args...]" << std::endl;
         std::cerr << "       " << argv[0] << " stop <container_name>" << std::endl;
         std::cerr << "       " << argv[0] << " rm <container_name>" << std::endl;
-        std::cerr << "Example: " << argv[0] << " /bin/sh --mem 100 --cpu 512 --cpuset 0-1 -v /tmp:/tmp --name mycontainer" << std::endl;
+        std::cerr << "Example: " << argv[0] << " /bin/sh --mem 100 --cpu 512 --cpuset 0-1 -v /tmp:/tmp -e MY_VAR=hello --name mycontainer" << std::endl;
         std::cerr << "Detach:  " << argv[0] << " /bin/sh -d --name mycontainer" << std::endl;
         std::cerr << "Commit:  " << argv[0] << " /bin/sh --commit myimage" << std::endl;
         std::cerr << "Exec:    " << argv[0] << " exec mycontainer /bin/ls" << std::endl;
@@ -923,6 +983,7 @@ int main(int argc, char* argv[]) {
     std::string commit_image = "";
     std::string container_name = "";
     bool detach_mode = false;
+    std::vector<std::string> env_vars;
     std::vector<char*> cmd_args;
     
     // 解析命令行参数
@@ -935,6 +996,8 @@ int main(int argc, char* argv[]) {
             cpuset = argv[++i];
         } else if (strcmp(argv[i], "-v") == 0 && i + 1 < argc) {
             volume_str = argv[++i];
+        } else if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) {
+            env_vars.push_back(argv[++i]);
         } else if (strcmp(argv[i], "--commit") == 0 && i + 1 < argc) {
             commit_image = argv[++i];
         } else if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
@@ -977,6 +1040,7 @@ int main(int argc, char* argv[]) {
     ContainerArgs container_args;
     container_args.child_args = child_args;
     container_args.detach_mode = detach_mode;
+    container_args.env_vars = env_vars;
     
     // 构建日志文件路径
     std::string log_file_path = CONTAINER_INFO_PATH + container_name + "/" + CONTAINER_LOG_FILE;
