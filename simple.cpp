@@ -16,6 +16,7 @@
 #include <sys/sysmacros.h> // 用于 makedev()
 #include <ctime> // 用于时间函数
 #include <cstdio> // 用于printf函数
+#include <signal.h> // 用于kill函数和信号
 
 #define STACK_SIZE (1024 * 1024)
 
@@ -496,6 +497,7 @@ void exec_container(const std::string& container_name, const std::vector<std::st
         close(fd);
     }
 
+
     // 切换到容器的根目录
     if (chdir("/") != 0) {
         perror("[Exec] Failed to chdir to container root");
@@ -513,6 +515,86 @@ void exec_container(const std::string& container_name, const std::vector<std::st
     
     if (execvp(args[0], args.data()) == -1) {
         perror("[Exec] execvp failed");
+    }
+}
+
+// 停止容器
+void stop_container(const std::string& container_name) {
+    std::cout << "[Stop] Stopping container: " << container_name << std::endl;
+    
+    // 获取容器PID
+    std::string container_pid = get_container_pid(container_name);
+    if (container_pid.empty()) {
+        std::cerr << "[Stop] Failed to get container PID" << std::endl;
+        return;
+    }
+    
+    std::cout << "[Stop] Container PID: " << container_pid << std::endl;
+    
+    // 转换PID为整数
+    pid_t pid = std::stoi(container_pid);
+    
+    // 发送SIGTERM信号停止容器
+    if (kill(pid, SIGTERM) == -1) {
+        perror("[Stop] Failed to stop container");
+        return;
+    }
+    
+    std::cout << "[Stop] SIGTERM signal sent to container" << std::endl;
+    
+    // 更新容器状态为stopped
+    ContainerInfo container_info = parse_container_config(CONTAINER_INFO_PATH + container_name + "/" + CONFIG_NAME);
+    if (container_info.id.empty()) {
+        std::cerr << "[Stop] Failed to read container info" << std::endl;
+        return;
+    }
+    
+    container_info.status = STOPPED;
+    container_info.pid = "";
+    
+    // 写回配置文件
+    std::string config_file = CONTAINER_INFO_PATH + container_name + "/" + CONFIG_NAME;
+    std::ofstream config_stream(config_file);
+    if (config_stream.is_open()) {
+        config_stream << "{\n";
+        config_stream << "  \"id\": \"" << container_info.id << "\",\n";
+        config_stream << "  \"name\": \"" << container_info.name << "\",\n";
+        config_stream << "  \"pid\": \"" << container_info.pid << "\",\n";
+        config_stream << "  \"command\": \"" << container_info.command << "\",\n";
+        config_stream << "  \"createTime\": \"" << container_info.created_time << "\",\n";
+        config_stream << "  \"status\": \"" << container_info.status << "\"\n";
+        config_stream << "}\n";
+        config_stream.close();
+        std::cout << "[Stop] Container status updated to stopped" << std::endl;
+    } else {
+        std::cerr << "[Stop] Failed to update container config" << std::endl;
+    }
+}
+
+// 删除容器
+void remove_container(const std::string& container_name) {
+    std::cout << "[Remove] Removing container: " << container_name << std::endl;
+    
+    // 检查容器状态
+    ContainerInfo container_info = parse_container_config(CONTAINER_INFO_PATH + container_name + "/" + CONFIG_NAME);
+    if (container_info.id.empty()) {
+        std::cerr << "[Remove] Container not found: " << container_name << std::endl;
+        return;
+    }
+    
+    if (container_info.status == RUNNING) {
+        std::cerr << "[Remove] Cannot remove running container. Please stop it first." << std::endl;
+        return;
+    }
+    
+    // 删除容器信息目录
+    std::string container_dir = CONTAINER_INFO_PATH + container_name;
+    std::string rm_cmd = "rm -rf " + container_dir;
+    
+    if (system(rm_cmd.c_str()) == 0) {
+        std::cout << "[Remove] Container removed successfully: " << container_name << std::endl;
+    } else {
+        std::cerr << "[Remove] Failed to remove container directory" << std::endl;
     }
 }
 
@@ -785,10 +867,14 @@ int main(int argc, char* argv[]) {
         std::cerr << "       " << argv[0] << " ps" << std::endl;
         std::cerr << "       " << argv[0] << " logs <container_name>" << std::endl;
         std::cerr << "       " << argv[0] << " exec <container_name> <command> [args...]" << std::endl;
+        std::cerr << "       " << argv[0] << " stop <container_name>" << std::endl;
+        std::cerr << "       " << argv[0] << " rm <container_name>" << std::endl;
         std::cerr << "Example: " << argv[0] << " /bin/sh --mem 100 --cpu 512 --cpuset 0-1 -v /tmp:/tmp --name mycontainer" << std::endl;
         std::cerr << "Detach:  " << argv[0] << " /bin/sh -d --name mycontainer" << std::endl;
         std::cerr << "Commit:  " << argv[0] << " /bin/sh --commit myimage" << std::endl;
         std::cerr << "Exec:    " << argv[0] << " exec mycontainer /bin/ls" << std::endl;
+        std::cerr << "Stop:    " << argv[0] << " stop mycontainer" << std::endl;
+        std::cerr << "Remove:  " << argv[0] << " rm mycontainer" << std::endl;
         return 1;
     }
     
@@ -812,6 +898,18 @@ int main(int argc, char* argv[]) {
             exec_cmd.push_back(argv[i]);
         }
         exec_container(container_name, exec_cmd);
+        return 0;
+    }
+    
+    // 处理stop命令
+    if (argc == 3 && strcmp(argv[1], "stop") == 0) {
+        stop_container(argv[2]);
+        return 0;
+    }
+    
+    // 处理rm命令
+    if (argc == 3 && strcmp(argv[1], "rm") == 0) {
+        remove_container(argv[2]);
         return 0;
     }
     
