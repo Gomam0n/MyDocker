@@ -690,3 +690,327 @@ runC 是现代容器生态系统的核心组件，它提供了标准化、安全
 
 在我们的 SimpleDocker 项目中，虽然实现了基本的容器功能，但与 runC 相比还有很大的改进空间。学习 runC 的设计理念和实现方式，有助于我们进一步完善和优化自己的容器实现。
 
+---
+
+## Linux 虚拟网络技术详解
+
+### 概述
+
+Linux 虚拟网络技术是现代容器和虚拟化技术的重要基础，它通过软件方式创建虚拟的网络设备和网络拓扑，实现网络隔离、连接和管理。这些技术为 Docker、Kubernetes 等容器平台提供了强大的网络功能支持。
+
+### 核心虚拟网络设备
+
+#### 1. **网络命名空间（Network Namespace）**
+
+网络命名空间是 Linux 内核提供的网络隔离机制，每个命名空间拥有独立的：
+- 网络接口（网卡）
+- 路由表
+- 防火墙规则
+- 网络统计信息
+- 套接字
+
+```bash
+# 创建网络命名空间
+ip netns add myns
+
+# 在命名空间中执行命令
+ip netns exec myns ip link list
+
+# 删除网络命名空间
+ip netns delete myns
+```
+
+**在容器中的应用：**
+- 每个容器都运行在独立的网络命名空间中
+- 实现容器间的网络隔离
+- 容器可以拥有独立的 IP 地址和网络配置
+
+#### 2. **虚拟以太网对（veth pair）**
+
+veth pair 是一对虚拟的以太网设备，数据从一端发送会立即在另一端接收，类似于一根虚拟的网线。
+
+```bash
+# 创建 veth pair
+ip link add veth0 type veth peer name veth1
+
+# 将一端移动到网络命名空间
+ip link set veth1 netns myns
+
+# 配置 IP 地址
+ip addr add 192.168.1.1/24 dev veth0
+ip netns exec myns ip addr add 192.168.1.2/24 dev veth1
+
+# 启动接口
+ip link set veth0 up
+ip netns exec myns ip link set veth1 up
+```
+
+**特点：**
+- 总是成对出现，无法单独存在
+- 一端通常在宿主机，另一端在容器内
+- 提供容器与外部网络通信的通道
+
+#### 3. **网桥（Bridge）**
+
+Linux 网桥是一个虚拟的二层交换机，可以连接多个网络接口，实现数据包的转发。
+
+```bash
+# 创建网桥
+ip link add br0 type bridge
+
+# 启动网桥
+ip link set br0 up
+
+# 将接口添加到网桥
+ip link set veth0 master br0
+
+# 为网桥配置 IP（可选）
+ip addr add 192.168.1.1/24 dev br0
+```
+
+**功能：**
+- 连接多个网络接口
+- 学习 MAC 地址，建立转发表
+- 支持 VLAN 和 STP 协议
+- 可以配置防火墙规则
+
+#### 4. **TUN/TAP 设备**
+
+- **TUN 设备**：工作在三层（网络层），处理 IP 数据包
+- **TAP 设备**：工作在二层（数据链路层），处理以太网帧
+
+```bash
+# 创建 TUN 设备
+ip tuntap add dev tun0 mode tun
+
+# 创建 TAP 设备
+ip tuntap add dev tap0 mode tap
+
+# 配置和启动
+ip addr add 10.0.0.1/24 dev tun0
+ip link set tun0 up
+```
+
+**应用场景：**
+- VPN 连接（如 OpenVPN）
+- 虚拟机网络
+- 网络仿真和测试
+
+### 高级网络技术
+
+#### 1. **VLAN（虚拟局域网）**
+
+VLAN 通过在以太网帧中添加标签来实现网络分割，一个物理网络可以划分为多个逻辑网络。
+
+```bash
+# 创建 VLAN 接口
+ip link add link eth0 name eth0.100 type vlan id 100
+
+# 配置 VLAN 接口
+ip addr add 192.168.100.1/24 dev eth0.100
+ip link set eth0.100 up
+```
+
+**优势：**
+- 网络隔离和安全性
+- 灵活的网络管理
+- 减少广播域
+- 支持多租户环境
+
+#### 2. **VXLAN（虚拟扩展局域网）**
+
+VXLAN 是一种网络虚拟化技术，通过在 UDP 数据包中封装二层以太网帧来创建覆盖网络。
+
+```bash
+# 创建 VXLAN 接口
+ip link add vxlan0 type vxlan id 100 remote 192.168.1.100 local 192.168.1.1 dev eth0
+
+# 配置和启动
+ip addr add 10.0.0.1/24 dev vxlan0
+ip link set vxlan0 up
+```
+
+**特点：**
+- 支持大规模网络虚拟化
+- 可以跨越三层网络
+- 支持多播和单播模式
+- 广泛用于云计算和数据中心
+
+#### 3. **MACVLAN 和 IPVLAN**
+
+**MACVLAN：**
+- 为单个物理接口创建多个虚拟接口
+- 每个虚拟接口有独立的 MAC 地址
+
+```bash
+# 创建 MACVLAN 接口
+ip link add macvlan0 link eth0 type macvlan mode bridge
+ip addr add 192.168.1.100/24 dev macvlan0
+ip link set macvlan0 up
+```
+
+**IPVLAN：**
+- 共享父接口的 MAC 地址
+- 支持 L2 和 L3 模式
+
+```bash
+# 创建 IPVLAN 接口
+ip link add ipvlan0 link eth0 type ipvlan mode l2
+ip addr add 192.168.1.101/24 dev ipvlan0
+ip link set ipvlan0 up
+```
+
+### 网络策略和安全
+
+#### 1. **iptables 和 netfilter**
+
+iptables 是 Linux 防火墙工具，基于 netfilter 框架实现数据包过滤、NAT 和修改。
+
+```bash
+# 基本防火墙规则
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+iptables -A INPUT -j DROP
+
+# NAT 规则（端口转发）
+iptables -t nat -A PREROUTING -p tcp --dport 8080 -j DNAT --to-destination 192.168.1.100:80
+iptables -t nat -A POSTROUTING -s 192.168.1.0/24 -j MASQUERADE
+```
+
+#### 2. **Traffic Control (tc)**
+
+tc 是 Linux 流量控制工具，可以实现带宽限制、优先级控制和流量整形。
+
+```bash
+# 限制接口带宽
+tc qdisc add dev eth0 root tbf rate 1mbit burst 32kbit latency 400ms
+
+# 创建分类队列
+tc qdisc add dev eth0 root handle 1: htb default 30
+tc class add dev eth0 parent 1: classid 1:1 htb rate 100mbit
+tc class add dev eth0 parent 1:1 classid 1:10 htb rate 80mbit ceil 100mbit
+```
+
+### 在容器技术中的应用
+
+#### 1. **Docker 网络模式**
+
+**Bridge 模式（默认）：**
+- 使用 docker0 网桥
+- 容器通过 veth pair 连接到网桥
+- 支持端口映射和容器间通信
+
+**Host 模式：**
+- 容器直接使用宿主机网络
+- 性能最好，但缺乏隔离性
+
+**None 模式：**
+- 容器没有网络接口
+- 需要手动配置网络
+
+**Container 模式：**
+- 多个容器共享同一个网络命名空间
+
+#### 2. **Kubernetes 网络模型**
+
+Kubernetes 要求：
+- 每个 Pod 有唯一的 IP 地址
+- Pod 间可以直接通信（无需 NAT）
+- 节点可以与所有 Pod 通信
+
+**常见 CNI 插件：**
+- **Flannel**：使用 VXLAN 或 host-gw 模式
+- **Calico**：使用 BGP 路由，支持网络策略
+- **Weave**：创建虚拟网络，支持加密
+- **Cilium**：基于 eBPF，提供高性能和安全性
+
+### 网络性能优化
+
+#### 1. **SR-IOV（单根 I/O 虚拟化）**
+- 硬件级别的网络虚拟化
+- 直接将物理网卡功能分配给虚拟机或容器
+- 提供接近原生的网络性能
+
+#### 2. **DPDK（数据平面开发套件）**
+- 绕过内核网络栈
+- 用户空间的高性能数据包处理
+- 适用于高吞吐量网络应用
+
+#### 3. **XDP（eXpress Data Path）**
+- 在网卡驱动层进行数据包处理
+- 基于 eBPF 技术
+- 提供可编程的高性能数据包处理
+
+### 网络监控和调试
+
+#### 1. **常用工具**
+
+```bash
+# 网络接口信息
+ip link show
+ip addr show
+
+# 路由信息
+ip route show
+route -n
+
+# 网络连接
+ss -tuln
+netstat -tuln
+
+# 数据包捕获
+tcpdump -i eth0
+wireshark
+
+# 网络性能测试
+iperf3 -s  # 服务端
+iperf3 -c server_ip  # 客户端
+```
+
+#### 2. **网络命名空间调试**
+
+```bash
+# 查看所有网络命名空间
+ip netns list
+
+# 在命名空间中执行命令
+ip netns exec myns ss -tuln
+ip netns exec myns tcpdump -i eth0
+
+# 查看容器网络信息
+docker exec container_name ip addr show
+docker exec container_name ip route show
+```
+
+### 最佳实践
+
+#### 1. **网络设计原则**
+- **隔离性**：不同应用使用不同网络
+- **可扩展性**：支持大规模部署
+- **安全性**：实施网络策略和访问控制
+- **性能**：选择合适的网络方案
+
+#### 2. **容器网络优化**
+- 合理选择网络模式
+- 避免不必要的网络跳转
+- 使用网络策略控制流量
+- 监控网络性能指标
+
+#### 3. **故障排除**
+- 检查网络配置和路由
+- 验证防火墙规则
+- 使用网络工具进行诊断
+- 查看系统日志和网络统计
+
+### 总结
+
+Linux 虚拟网络技术为现代容器和云计算平台提供了强大的网络功能：
+
+1. **基础技术**：网络命名空间、veth pair、网桥等提供了网络虚拟化的基础
+2. **高级功能**：VLAN、VXLAN、MACVLAN 等支持复杂的网络拓扑
+3. **安全控制**：iptables、网络策略等确保网络安全
+4. **性能优化**：SR-IOV、DPDK、XDP 等提供高性能网络方案
+5. **容器集成**：与 Docker、Kubernetes 等平台深度集成
+
+理解这些技术对于构建和管理现代容器化应用至关重要，它们不仅提供了网络连接功能，还确保了安全性、性能和可扩展性。在我们的 SimpleDocker 项目中，这些技术为实现容器网络功能提供了理论基础和实践指导。
+
