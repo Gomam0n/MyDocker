@@ -6,8 +6,8 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <cstring>
-#include "../constants.h"
-#include "../utils.h"
+#include "../common/constants.h"
+#include "../common/utils.h"
 
 // 创建工作空间（OverlayFS文件系统）
 void new_workspace(const VolumeInfo& volume_info) {

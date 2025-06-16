@@ -1,4 +1,7 @@
 #include "network.h"
+#include "../common/constants.h"
+#include "../common/structures.h"
+#include "../common/utils.h"
 
 // 执行系统命令并返回输出
 std::string execute_command(const std::string& command) {

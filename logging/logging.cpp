@@ -1,4 +1,5 @@
 #include "logging.h"
+#include "../common/constants.h"
 
 // 显示容器日志
 void show_container_logs(const std::string& container_name) {

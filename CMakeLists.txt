@@ -21,7 +21,7 @@ find_package(Threads REQUIRED)
 # 源文件
 set(SOURCES
     simpleDocker.cpp
-    utils.cpp
+    common/utils.cpp
     logging/logging.cpp
     network/network.cpp
     container/container.cpp
@@ -30,9 +30,9 @@ set(SOURCES
 )
 # 头文件
 set(HEADERS
-    constants.h
-    structures.h
-    utils.h
+    common/constants.h
+    common/structures.h
+    common/utils.h
     logging/logging.h
     network/network.h
     container/container.h

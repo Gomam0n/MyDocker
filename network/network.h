@@ -7,9 +7,9 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include "../structures.h"
-#include "../constants.h"
-#include "../utils.h"
+#include "../common/structures.h"
+#include "../common/constants.h"
+#include "../common/utils.h"
 
 // 网络接口管理
 bool interface_exists(const std::string& interface_name);

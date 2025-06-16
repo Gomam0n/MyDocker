@@ -2,7 +2,7 @@
 #define FILESYSTEM_H
 
 #include <string>
-#include "../structures.h"
+#include "../common/structures.h"
 
 // OverlayFS工作空间管理
 void new_workspace(const VolumeInfo& volume_info = {});

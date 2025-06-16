@@ -4,9 +4,9 @@
 #include <string>
 #include <fstream>
 #include <iostream>
-#include "../constants.h"
-#include "../structures.h"
-#include "../utils.h"
+#include "../common/constants.h"
+#include "../common/structures.h"
+#include "../common/utils.h"
 
 // 日志管理相关函数声明
 
