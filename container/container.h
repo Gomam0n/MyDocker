@@ -20,4 +20,7 @@ void exec_container(const std::string& container_name, const std::vector<std::st
 void stop_container(const std::string& container_name);
 void remove_container(const std::string& container_name);
 
+// Commit功能：将容器保存为镜像
+void commit_container(const std::string& image_name);
+
 #endif // CONTAINER_H

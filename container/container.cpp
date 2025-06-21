@@ -423,3 +423,19 @@ void remove_container(const std::string& container_name) {
         std::cerr << "[Remove] Failed to remove container directory" << std::endl;
     }
 }
+
+// Commit功能：将容器保存为镜像
+void commit_container(const std::string& image_name) {
+    std::cout << "[Commit] Committing container to image: " << image_name << std::endl;
+    
+    std::string image_tar = ROOT_URL + image_name + ".tar";
+    std::string tar_cmd = "tar -czf " + image_tar + " -C " + MNT_URL + " .";
+    
+    std::cout << "[Commit] Creating tar archive: " << image_tar << std::endl;
+    
+    if (system(tar_cmd.c_str()) != 0) {
+        std::cerr << "[Commit] Failed to create tar archive" << std::endl;
+    } else {
+        std::cout << "[Commit] Container committed successfully to: " << image_tar << std::endl;
+    }
+}
