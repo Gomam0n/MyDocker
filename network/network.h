@@ -3,9 +3,9 @@
 
 #include <string>
 #include <vector>
-#include "../common/structures.h"
-#include "../common/constants.h"
-#include "../common/utils.h"
+#include "common/structures.h"
+#include "common/constants.h"
+#include "common/utils.h"
 
 // 网络接口管理
 bool interface_exists(const std::string& interface_name);

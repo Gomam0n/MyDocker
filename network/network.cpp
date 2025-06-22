@@ -1,7 +1,7 @@
 #include "network.h"
-#include "../common/constants.h"
-#include "../common/structures.h"
-#include "../common/utils.h"
+#include "common/constants.h"
+#include "common/structures.h"
+#include "common/utils.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>

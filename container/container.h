@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 #include <sys/types.h>
-#include "../common/structures.h"
+#include "common/structures.h"
 
 // 容器信息管理
 std::string record_container_info(pid_t container_pid, const std::vector<std::string>& command_array, 

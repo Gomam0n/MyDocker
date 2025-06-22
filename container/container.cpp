@@ -1,8 +1,8 @@
 #include "container.h"
-#include "../common/constants.h"
-#include "../logging/logging.h"
-#include "../common/utils.h"
-#include "../network/network.h"
+#include "common/constants.h"
+#include "logging/logging.h"
+#include "common/utils.h"
+#include "network/network.h"
 #include <iostream>
 #include <fstream>
 #include <ctime>
