@@ -48,12 +48,14 @@ bool path_exists(const std::string& path) {
 
 // 创建目录（如果不存在）
 // Todo: make this used in other parts of the code
-void create_directory_if_not_exists(const std::string& path) {
+bool create_directory_if_not_exists(const std::string& path) {
     struct stat buffer;
     if (stat(path.c_str(), &buffer) == -1) {
         std::string mkdir_cmd = "mkdir -p " + path;
         if (system(mkdir_cmd.c_str()) != 0) {
             std::cerr << "[Common] Failed to create directory: " << path << std::endl;
+            return false;
         }
     }
+    return true;
 }

@@ -2,6 +2,12 @@
 #include "../common/constants.h"
 #include "../common/structures.h"
 #include "../common/utils.h"
+#include <iostream>
+#include <fstream>
+#include <sstream>
+
+// 全局IPAM分配器
+IPAMAllocator ipam_allocator;
 
 // 执行系统命令并返回输出
 std::string execute_command(const std::string& command) {
@@ -296,9 +302,6 @@ bool IPAMAllocator::release(const std::string& subnet, const std::string& ip) {
     return false;
 }
 
-// 全局IPAM分配器
-IPAMAllocator ipam_allocator;
-
 // 改进的IP分配算法
 std::string allocate_ip(const std::string& subnet) {
     std::cout << "[Network] Allocating IP for subnet: " << subnet << std::endl;
@@ -331,6 +334,7 @@ bool setup_container_network(const std::string& container_id, const std::string&
         }
         std::cout << "[Network] Allocated IP: " << container_ip << " for container: " << container_id << std::endl;
     }
+    // Todo: 检查IP是否已分配
     
     std::string veth_host = "veth" + container_id.substr(0, 5);
     std::string veth_container = "vethpeer0";

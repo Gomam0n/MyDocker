@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <map>
 
 // Volume相关结构
 struct VolumeInfo {
@@ -39,6 +40,17 @@ struct ContainerInfo {
     std::string command;
     std::string created_time;
     std::string status;
+};
+
+// IP分配管理结构
+struct IPAMAllocator {
+    std::string subnet_file_path;
+    std::map<std::string, std::string> subnets; // subnet -> allocation bitmap
+    IPAMAllocator();
+    bool load();
+    bool save();
+    std::string allocate(const std::string& subnet);
+    bool release(const std::string& subnet, const std::string& ip);
 };
 
 #endif // STRUCTURES_H

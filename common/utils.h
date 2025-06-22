@@ -17,6 +17,6 @@ std::string generate_unique_mac(const std::string& container_id);
 bool path_exists(const std::string& path);
 
 // 创建目录（如果不存在）
-void create_directory_if_not_exists(const std::string& path);
+bool create_directory_if_not_exists(const std::string& path);
 
 #endif // UTILS_H

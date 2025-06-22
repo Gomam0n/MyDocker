@@ -46,9 +46,7 @@ std::string record_container_info(pid_t container_pid, const std::vector<std::st
     
     // 创建容器信息目录
     std::string dir_path = CONTAINER_INFO_PATH + container_name + "/";
-    std::string mkdir_cmd = "mkdir -p " + dir_path;
-    if (system(mkdir_cmd.c_str()) != 0) {
-        std::cerr << "[Container] Failed to create container info directory" << std::endl;
+    if (!create_directory_if_not_exists(dir_path)) {
         return "";
     }
     

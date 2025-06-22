@@ -3,10 +3,6 @@
 
 #include <string>
 #include <vector>
-#include <map>
-#include <iostream>
-#include <fstream>
-#include <sstream>
 #include "../common/structures.h"
 #include "../common/constants.h"
 #include "../common/utils.h"
@@ -23,18 +19,6 @@ bool delete_bridge_network(const std::string& bridge_name);
 bool save_network_config(const NetworkInfo& network);
 NetworkInfo load_network_config(const std::string& network_name);
 bool remove_network_config(const std::string& network_name);
-
-// IP分配管理结构
-struct IPAMAllocator {
-    std::string subnet_file_path;
-    std::map<std::string, std::string> subnets; // subnet -> allocation bitmap
-    
-    IPAMAllocator();
-    bool load();
-    bool save();
-    std::string allocate(const std::string& subnet);
-    bool release(const std::string& subnet, const std::string& ip);
-};
 
 // IP分配管理
 std::string allocate_ip(const std::string& subnet);
